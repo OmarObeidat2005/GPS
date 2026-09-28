@@ -1,1 +1,906 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Jordan Cockpit Navigation | نظام الملاحة الذكي</title>
 
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Leaflet CSS & JS - الإصدار الأكثر استقراراً عالمياً -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+    <!-- FontAwesome 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+    <!-- Google Fonts: الخط العربي الفاخر + أرقام العدادات -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-deep: #0a0c0f;
+            --surface-card: rgba(18, 21, 28, 0.95);
+            --border-matte: rgba(255, 255, 255, 0.08);
+            --amber-gold: #f59e0b;
+            --amber-bright: #fbbf24;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            font-family: 'IBM Plex Sans Arabic', -apple-system, sans-serif;
+        }
+
+        html, body {
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: var(--bg-deep);
+            color: #f3f4f6;
+        }
+
+        .font-digits {
+            font-family: 'Space Grotesk', monospace;
+        }
+
+        #map-container, #map {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            background: #111419;
+        }
+
+        /* تحويل خريطة الشوارع العالمية إلى خريطة فحمية فاخرة دون الحاجة لأي مفاتيح أو سيرفرات محجوبة */
+        .luxury-dark-filter .leaflet-tile-pane {
+            filter: brightness(0.65) invert(1) contrast(3.2) hue-rotate(200deg) saturate(0.25) brightness(0.75);
+            -webkit-filter: brightness(0.65) invert(1) contrast(3.2) hue-rotate(200deg) saturate(0.25) brightness(0.75);
+        }
+
+        .leaflet-control-attribution, .leaflet-control-zoom {
+            display: none !important;
+        }
+
+        .matte-glass {
+            background: var(--surface-card);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-matte);
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
+        }
+
+        /* مجسم مؤشر السيارة الذهبي والفحمي الفاخر */
+        .car-locator {
+            width: 44px;
+            height: 44px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.25s ease-out;
+        }
+
+        .car-locator-ring {
+            position: absolute;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: 2px solid rgba(245, 158, 11, 0.5);
+            background: rgba(245, 158, 11, 0.15);
+            animation: radar-pulse 2s infinite ease-out;
+        }
+
+        @keyframes radar-pulse {
+            0% { transform: scale(0.6); opacity: 1; }
+            100% { transform: scale(1.6); opacity: 0; }
+        }
+
+        .car-locator-arrow {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, #f59e0b, #b45309);
+            box-shadow: 0 4px 14px rgba(245, 158, 11, 0.6);
+            border: 2px solid #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #000000;
+            font-size: 14px;
+        }
+
+        .dest-flag {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ef4444, #991b1b);
+            border: 2px solid #ffffff;
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-size: 15px;
+            animation: bounce-pin 1s infinite alternate;
+        }
+
+        @keyframes bounce-pin {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(-8px); }
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body>
+
+    <div class="relative w-screen h-screen overflow-hidden bg-[#0a0c0f]">
+        
+        <!-- حاوية الخريطة -->
+        <div id="map-container" class="luxury-dark-filter">
+            <div id="map"></div>
+        </div>
+
+        <!-- الشريط العلوي: توقيت الأردن المباشر، حالة الـ GPS والطقس -->
+        <header class="absolute top-0 inset-x-0 z-30 h-14 matte-glass border-b border-white/5 px-4 sm:px-6 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <button onclick="navCore.requestRealLocation(true)" class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-all text-xs">
+                    <span id="gps-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                    <span id="gps-label" class="font-medium text-stone-300">جاري الاتصال بالأقمار الصناعية...</span>
+                </button>
+                <div class="hidden md:flex items-center gap-1.5 text-xs text-stone-400 border-r border-white/10 pr-3">
+                    <i class="fas fa-compass text-amber-400 text-xs"></i>
+                    <span id="header-city-text">المملكة الأردنية الهاشمية</span>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2.5 sm:gap-4">
+                <!-- ويدجت طقس الأردن الحي -->
+                <div class="flex items-center gap-2 px-3 py-1 rounded-xl bg-white/5 border border-white/5 text-xs">
+                    <i id="weather-icon" class="fas fa-sun text-amber-400"></i>
+                    <span id="weather-temp" class="font-digits font-bold text-white text-xs">--°</span>
+                    <span id="weather-desc" class="hidden sm:inline text-stone-400 text-[11px]">الأردن</span>
+                </div>
+
+                <!-- توقيت الأردن الحقيقي المباشر -->
+                <div class="flex items-center gap-2 px-3 py-1 rounded-xl bg-stone-900/90 border border-amber-500/25 text-xs">
+                    <div class="flex flex-col text-left">
+                        <span id="jordan-date" class="text-[9px] text-stone-400 leading-none">اليوم</span>
+                        <div class="flex items-baseline gap-1 mt-0.5">
+                            <span id="jordan-time" class="font-digits font-bold text-amber-400 text-sm tracking-wider">--:--</span>
+                            <span id="jordan-seconds" class="font-digits text-[10px] text-stone-500">00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- زر الصوت -->
+                <button onclick="navCore.toggleAudio()" id="voice-btn" class="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 text-stone-300 flex items-center justify-center transition-colors" title="تشغيل / كتم التوجيه">
+                    <i class="fas fa-volume-high text-xs text-amber-400" id="voice-icon"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- وحدة البحث والتحكم الذكية العلوية -->
+        <div class="absolute top-16 inset-x-3 sm:inset-x-6 lg:right-6 lg:left-auto lg:w-[460px] z-30 flex flex-col gap-2">
+            <div class="matte-glass rounded-2xl p-2 flex items-center gap-2">
+                <!-- تبديل مظهر الخريطة الفخم (داكن / شوارع ناصعة / قمر صناعي) -->
+                <button onclick="navCore.toggleMapStyle()" id="style-btn" class="h-11 px-3 rounded-xl bg-stone-900 hover:bg-stone-800 border border-white/5 text-stone-300 flex flex-col items-center justify-center transition-all flex-shrink-0">
+                    <i class="fas fa-layer-group text-xs text-amber-400"></i>
+                    <span id="style-name" class="text-[9px] font-semibold text-stone-400 mt-0.5">داكن</span>
+                </button>
+
+                <!-- حقل البحث لمدن وقرى وشوارع الأردن -->
+                <div class="relative flex-1">
+                    <input type="text" id="search-input" 
+                           placeholder="ابحث عن أي شارع، بلدة، أو معلم بالأردن..." 
+                           oninput="navCore.onSearchType(this.value)"
+                           onkeydown="if(event.key==='Enter') navCore.searchJordan(this.value)"
+                           class="w-full bg-stone-950/80 text-white placeholder-stone-500 text-xs sm:text-sm rounded-xl py-3 pr-9 pl-9 border border-white/10 focus:border-amber-500/50 focus:outline-none transition-all">
+                    <i class="fas fa-search absolute right-3.5 top-3.5 text-stone-400 text-xs"></i>
+                    <button onclick="navCore.clearSearchInput()" id="clear-search" class="hidden absolute left-3 top-3 text-stone-400 hover:text-white p-1">
+                        <i class="fas fa-times-circle text-xs"></i>
+                    </button>
+                </div>
+
+                <!-- زر لصق لوكيشن واتساب بنقرة واحدة -->
+                <button onclick="navCore.pasteWhatsApp()" class="h-11 px-3 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-all shadow-lg flex-shrink-0" title="لصق لوكيشن واتساب">
+                    <i class="fab fa-whatsapp text-sm"></i>
+                    <span class="text-xs font-semibold hidden sm:inline">لوكيشن</span>
+                </button>
+            </div>
+
+            <!-- التصنيفات السريعة في الأردن -->
+            <div class="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+                <button onclick="navCore.quickCategory('محطة وقود')" class="px-3.5 py-1.5 rounded-xl bg-stone-900/90 text-xs text-stone-200 hover:text-white border border-white/5 flex items-center gap-1.5 flex-shrink-0 transition-all">
+                    <i class="fas fa-gas-pump text-amber-400 text-[11px]"></i>
+                    <span>كازيات</span>
+                </button>
+                <button onclick="navCore.quickCategory('مستشفى')" class="px-3.5 py-1.5 rounded-xl bg-stone-900/90 text-xs text-stone-200 hover:text-white border border-white/5 flex items-center gap-1.5 flex-shrink-0 transition-all">
+                    <i class="fas fa-hospital text-rose-400 text-[11px]"></i>
+                    <span>مستشفيات</span>
+                </button>
+                <button onclick="navCore.quickCategory('مسجد')" class="px-3.5 py-1.5 rounded-xl bg-stone-900/90 text-xs text-stone-200 hover:text-white border border-white/5 flex items-center gap-1.5 flex-shrink-0 transition-all">
+                    <i class="fas fa-mosque text-emerald-400 text-[11px]"></i>
+                    <span>مساجد</span>
+                </button>
+                <button onclick="navCore.quickCategory('مطعم')" class="px-3.5 py-1.5 rounded-xl bg-stone-900/90 text-xs text-stone-200 hover:text-white border border-white/5 flex items-center gap-1.5 flex-shrink-0 transition-all">
+                    <i class="fas fa-utensils text-orange-400 text-[11px]"></i>
+                    <span>مطاعم</span>
+                </button>
+            </div>
+
+            <!-- قائمة الاقتراحات السريعة -->
+            <div id="suggestions-box" class="hidden matte-glass rounded-2xl p-2 space-y-1 max-h-56 overflow-y-auto no-scrollbar"></div>
+
+            <!-- بطاقة التوجيه الذكية أثناء القيادة -->
+            <div id="route-hud" class="hidden matte-glass rounded-2xl p-4 border-r-4 border-amber-500 text-right">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center justify-center text-xl flex-shrink-0">
+                        <i id="turn-icon" class="fas fa-arrow-up"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-baseline gap-1.5">
+                            <span id="route-km" class="text-2xl font-bold font-digits text-white">--</span>
+                            <span id="route-unit" class="text-xs text-stone-400 font-medium">كم</span>
+                        </div>
+                        <p id="route-target-title" class="text-xs font-semibold text-stone-200 truncate mt-0.5">جاري التحضير...</p>
+                    </div>
+                    <button onclick="navCore.endNavigation()" class="px-3 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 text-xs font-semibold transition-colors">
+                        إنهاء
+                    </button>
+                </div>
+                <div class="mt-3 pt-2.5 border-t border-white/5 flex items-center justify-between text-xs text-stone-400 font-digits">
+                    <span class="text-emerald-400 font-bold" id="route-eta">وصول: --:--</span>
+                    <span id="route-stat-distance">-- كم</span>
+                    <span id="route-stat-time">-- دقيقة</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- بطاقة اختيار الموقع بالنقر المباشر على الخريطة -->
+        <div id="pin-card" class="hidden absolute bottom-20 left-1/2 -translate-x-1/2 z-40 matte-glass rounded-2xl p-3.5 flex items-center gap-3 max-w-[92vw] sm:max-w-md border border-amber-500/30">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center text-base flex-shrink-0">
+                <i class="fas fa-location-dot"></i>
+            </div>
+            <div class="flex-1 min-w-0 text-right">
+                <h4 id="pin-title" class="text-xs font-bold text-white truncate">نقطة مختارة على الخريطة</h4>
+                <p id="pin-coords" class="text-[10px] text-stone-400 font-digits truncate mt-0.5">31.95°N, 35.91°E</p>
+            </div>
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+                <button onclick="navCore.startRouteToPin()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1.5 transition-all">
+                    <i class="fas fa-play text-[10px]"></i>
+                    <span>توجيه</span>
+                </button>
+                <button onclick="navCore.dismissPin()" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-stone-400 hover:text-white flex items-center justify-center text-xs">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- لوحة التحكم الجانبية: عداد السرعة والتمركز والتكبير -->
+        <aside class="absolute left-3 sm:left-6 bottom-20 z-30 flex flex-col gap-2.5 items-center">
+            <div class="matte-glass rounded-2xl p-3 flex flex-col items-center min-w-[80px]">
+                <span id="speed-val" class="text-3xl font-bold font-digits text-amber-400 leading-none">0</span>
+                <span class="text-[9px] font-semibold text-stone-400 mt-1">كم/س</span>
+            </div>
+
+            <button onclick="navCore.centerUserLocation(true)" class="w-12 h-12 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 flex items-center justify-center shadow-lg transition-all active:scale-95" title="تمركز على موقعي">
+                <i class="fas fa-location-crosshairs text-lg"></i>
+            </button>
+
+            <div class="matte-glass rounded-2xl p-1 flex flex-col">
+                <button onclick="navCore.map.zoomIn()" class="w-9 h-9 rounded-xl hover:bg-white/5 text-stone-300 flex items-center justify-center">
+                    <i class="fas fa-plus text-xs"></i>
+                </button>
+                <div class="w-full h-px bg-white/5"></div>
+                <button onclick="navCore.map.zoomOut()" class="w-9 h-9 rounded-xl hover:bg-white/5 text-stone-300 flex items-center justify-center">
+                    <i class="fas fa-minus text-xs"></i>
+                </button>
+            </div>
+        </aside>
+
+        <!-- شريط المعلومات السفلي الفاخر لاسم الشارع الحالي -->
+        <footer class="absolute bottom-2 inset-x-3 sm:inset-x-6 z-30">
+            <div class="matte-glass rounded-2xl px-4 py-2.5 flex items-center justify-between text-xs gap-3">
+                <div class="flex items-center gap-2.5 truncate flex-1">
+                    <i class="fas fa-road text-amber-400 text-xs flex-shrink-0"></i>
+                    <span id="street-name-label" class="font-medium text-stone-200 truncate">جاري تحديد الطريق الفعلي...</span>
+                </div>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                    <button onclick="navCore.fitWholeJordan()" class="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-stone-300 text-[11px] font-medium transition-colors flex items-center gap-1.5">
+                        <i class="fas fa-map-location-dot text-[10px] text-amber-400"></i>
+                        <span>كامل الأردن</span>
+                    </button>
+                </div>
+            </div>
+        </footer>
+
+        <!-- نافذة الإشعارات السريعة (Toast) -->
+        <div id="toast" class="hidden fixed bottom-20 left-1/2 -translate-x-1/2 z-50 matte-glass px-4 py-2.5 rounded-xl border border-amber-500/40 text-white text-xs flex items-center gap-2 transition-all">
+            <i class="fas fa-circle-info text-amber-400" id="toast-icon"></i>
+            <span id="toast-message">إشعار</span>
+        </div>
+
+    </div>
+
+    <script>
+        const navCore = {
+            map: null,
+            userMarker: null,
+            pinMarker: null,
+            routeLine: null,
+            audioEnabled: true,
+            speechSynth: window.speechSynthesis || null,
+
+            // طبقات عالمية مضمونة 100% تعمل على أي متصفح وشبكة دون حجب
+            layers: {},
+            currentStyleIndex: 0,
+            styles: [
+                { key: 'dark', name: 'داكن فاخر', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', isDark: true },
+                { key: 'streets', name: 'شوارع ناصعة', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', isDark: false },
+                { key: 'satellite', name: 'قمر صناعي', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{x}/{y}', isDark: false }
+            ],
+
+            userLoc: {
+                lat: null,
+                lng: null,
+                heading: 0,
+                speed: 0,
+                hasRealGps: false
+            },
+
+            targetPin: null,
+            activeNavigation: null,
+
+            init: function() {
+                this.initMapEngine();
+                this.startClockEngine();
+                this.requestRealLocation(false);
+
+                // حل قاطع لأي شاشة رمادية بإنعاش مقاسات الخريطة فورياً
+                [100, 300, 700, 1500].forEach(ms => setTimeout(() => this.fixMapDisplay(), ms));
+                window.addEventListener('resize', () => this.fixMapDisplay());
+            },
+
+            fixMapDisplay: function() {
+                if (this.map) {
+                    this.map.invalidateSize();
+                }
+            },
+
+            initMapEngine: function() {
+                // مركز عام للأردن (عمان/إربد/الوسط) حتى التقاط إشارة الـ GPS
+                this.map = L.map('map', {
+                    center: [31.9539, 35.9106],
+                    zoom: 12,
+                    zoomControl: false,
+                    attributionControl: false
+                });
+
+                // تحميل طبقة الخريطة الموثوقة عالمياً
+                this.styles.forEach(s => {
+                    this.layers[s.key] = L.tileLayer(s.url, {
+                        maxZoom: 19,
+                        crossOrigin: true
+                    });
+                });
+
+                this.layers['dark'].addTo(this.map);
+                this.map.on('click', (e) => this.handleMapClick(e.latlng.lat, e.latlng.lng));
+            },
+
+            toggleMapStyle: function() {
+                const current = this.styles[this.currentStyleIndex];
+                this.map.removeLayer(this.layers[current.key]);
+
+                this.currentStyleIndex = (this.currentStyleIndex + 1) % this.styles.length;
+                const next = this.styles[this.currentStyleIndex];
+
+                this.layers[next.key].addTo(this.map);
+                
+                const container = document.getElementById('map-container');
+                if (next.isDark) {
+                    container.classList.add('luxury-dark-filter');
+                } else {
+                    container.classList.remove('luxury-dark-filter');
+                }
+
+                document.getElementById('style-name').innerText = next.name;
+                this.notify(`تم تبديل نمط الخريطة: ${next.name}`);
+                this.fixMapDisplay();
+            },
+
+            requestRealLocation: function(userTriggered = false) {
+                if (!navigator.geolocation) {
+                    this.updateGpsStatus(false, "المتصفح لا يدعم الـ GPS");
+                    return;
+                }
+
+                if (userTriggered) {
+                    this.notify("جاري البحث عن موقعك عبر الأقمار الصناعية...");
+                }
+
+                this.updateGpsStatus(false, "جاري استقبال إشارة الأقمار الصناعية...");
+
+                navigator.geolocation.getCurrentPosition(
+                    pos => this.onGpsData(pos, true),
+                    err => {
+                        console.warn("GPS Notice:", err.message);
+                        this.updateGpsStatus(false, "يرجى السماح بصلاحية الموقع في المتصفح");
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 }
+                );
+
+                navigator.geolocation.watchPosition(
+                    pos => this.onGpsData(pos, false),
+                    err => console.warn("Watch Error:", err),
+                    { enableHighAccuracy: true, maximumAge: 1000 }
+                );
+            },
+
+            onGpsData: function(pos, isFirst) {
+                const c = pos.coords;
+                const lat = c.latitude;
+                const lng = c.longitude;
+                const speed = (c.speed !== null && !isNaN(c.speed)) ? Math.round(c.speed * 3.6) : 0;
+                const heading = (c.heading !== null && !isNaN(c.heading)) ? c.heading : this.userLoc.heading;
+
+                const wasFound = this.userLoc.hasRealGps;
+                this.userLoc = { lat, lng, heading, speed, hasRealGps: true };
+
+                this.updateGpsStatus(true, "متصل بالأقمار الصناعية");
+                document.getElementById('speed-val').innerText = speed;
+
+                this.renderUserCarMarker(lat, lng, heading);
+
+                if (!wasFound || isFirst) {
+                    this.map.setView([lat, lng], 16, { animate: true });
+                    this.reverseGeocode(lat, lng);
+                    this.fetchJordanWeather(lat, lng);
+                    this.notify("تم تحديد موقعك الحقيقي بنجاح!");
+                }
+
+                if (this.activeNavigation) {
+                    this.updateNavigationProgress(lat, lng);
+                }
+            },
+
+            updateGpsStatus: function(ok, text) {
+                const dot = document.getElementById('gps-dot');
+                const lbl = document.getElementById('gps-label');
+                lbl.innerText = text;
+                dot.className = ok 
+                    ? "w-2.5 h-2.5 rounded-full bg-emerald-400" 
+                    : "w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse";
+            },
+
+            renderUserCarMarker: function(lat, lng, heading) {
+                if (!this.userMarker) {
+                    const html = `
+                        <div class="car-locator" id="car-locator-node" style="transform: rotate(${heading}deg);">
+                            <div class="car-locator-ring"></div>
+                            <div class="car-locator-arrow">
+                                <i class="fas fa-location-arrow"></i>
+                            </div>
+                        </div>
+                    `;
+                    const icon = L.divIcon({
+                        className: 'user-marker-dom',
+                        html: html,
+                        iconSize: [44, 44],
+                        iconAnchor: [22, 22]
+                    });
+                    this.userMarker = L.marker([lat, lng], { icon: icon, zIndexOffset: 3000 }).addTo(this.map);
+                } else {
+                    this.userMarker.setLatLng([lat, lng]);
+                    const el = document.getElementById('car-locator-node');
+                    if (el) el.style.transform = `rotate(${heading}deg)`;
+                }
+            },
+
+            centerUserLocation: function(notify = false) {
+                if (this.userLoc.hasRealGps && this.userLoc.lat) {
+                    this.map.setView([this.userLoc.lat, this.userLoc.lng], 16, { animate: true });
+                    if (notify) this.notify("تم التمركز على موقعك الفعلي");
+                } else {
+                    this.requestRealLocation(true);
+                }
+            },
+
+            handleMapClick: async function(lat, lng) {
+                this.targetPin = { lat, lng };
+
+                if (this.pinMarker) {
+                    this.map.removeLayer(this.pinMarker);
+                }
+
+                const flagHtml = `<div class="dest-flag"><i class="fas fa-location-dot"></i></div>`;
+                const flagIcon = L.divIcon({
+                    className: 'dest-flag-dom',
+                    html: flagHtml,
+                    iconSize: [38, 38],
+                    iconAnchor: [19, 36]
+                });
+
+                this.pinMarker = L.marker([lat, lng], { icon: flagIcon }).addTo(this.map);
+
+                const card = document.getElementById('pin-card');
+                card.classList.remove('hidden');
+                document.getElementById('pin-coords').innerText = `${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E`;
+                document.getElementById('pin-title').innerText = "جاري قراءة تفاصيل الموقع...";
+
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=17&accept-language=ar`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        const title = data.display_name ? data.display_name.split(',')[0] : "موقع محدد بالأردن";
+                        document.getElementById('pin-title').innerText = title;
+                        this.targetPin.title = title;
+                    }
+                } catch (e) {
+                    document.getElementById('pin-title').innerText = "نقطة على الخريطة";
+                }
+            },
+
+            startRouteToPin: function() {
+                if (this.targetPin) {
+                    document.getElementById('pin-card').classList.add('hidden');
+                    this.navigateTo(this.targetPin.lat, this.targetPin.lng, this.targetPin.title || "الوجهة المختارة");
+                }
+            },
+
+            dismissPin: function() {
+                this.targetPin = null;
+                if (this.pinMarker) {
+                    this.map.removeLayer(this.pinMarker);
+                    this.pinMarker = null;
+                }
+                document.getElementById('pin-card').classList.add('hidden');
+            },
+
+            navigateTo: async function(destLat, destLng, title) {
+                if (!this.userLoc.lat || !this.userLoc.lng) {
+                    this.notify("يرجى الانتظار لتحديد موقعك الحالي");
+                    this.requestRealLocation(true);
+                    return;
+                }
+
+                this.activeNavigation = { destLat, destLng, title };
+
+                const hud = document.getElementById('route-hud');
+                hud.classList.remove('hidden');
+                document.getElementById('route-target-title').innerText = title;
+                document.getElementById('route-km').innerText = '--';
+
+                this.speak(`الانطلاق نحو ${title}`);
+
+                const sLat = this.userLoc.lat;
+                const sLng = this.userLoc.lng;
+
+                // رسم المسار الدقيق بالمنعطفات عبر OSRM
+                const url = `https://router.project-osrm.org/route/v1/driving/${sLng},${sLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=true`;
+
+                try {
+                    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.routes && data.routes.length > 0) {
+                            this.displayRouteLine(data.routes[0], title);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("OSRM Route issue:", e);
+                }
+
+                // مسار مستقيم احتياطي
+                this.renderLine([[sLat, sLng], [destLat, destLng]]);
+                this.notify("تم رسم خط الاتجاه المباشر للوجهة");
+            },
+
+            displayRouteLine: function(route, title) {
+                const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+                this.renderLine(coords);
+
+                const km = (route.distance / 1000).toFixed(1);
+                const mins = Math.round(route.duration / 60);
+
+                const eta = new Date();
+                eta.setMinutes(eta.getMinutes() + mins);
+                const etaTime = `${String(eta.getHours()).padStart(2, '0')}:${String(eta.getMinutes()).padStart(2, '0')}`;
+
+                document.getElementById('route-eta').innerText = `وصول: ${etaTime}`;
+                document.getElementById('route-stat-distance').innerText = `${km} كم`;
+                document.getElementById('route-stat-time').innerText = `${mins} دقيقة`;
+                document.getElementById('route-km').innerText = km;
+                document.getElementById('route-unit').innerText = 'كم';
+            },
+
+            renderLine: function(points) {
+                if (this.routeLine) {
+                    this.map.removeLayer(this.routeLine);
+                }
+                this.routeLine = L.polyline(points, {
+                    color: '#f59e0b',
+                    weight: 6,
+                    opacity: 0.95,
+                    lineJoin: 'round',
+                    lineCap: 'round'
+                }).addTo(this.map);
+
+                this.map.fitBounds(this.routeLine.getBounds(), { padding: [70, 70] });
+            },
+
+            updateNavigationProgress: function(lat, lng) {
+                if (!this.activeNavigation) return;
+                const userP = L.latLng(lat, lng);
+                const targetP = L.latLng(this.activeNavigation.destLat, this.activeNavigation.destLng);
+                const dist = userP.distanceTo(targetP);
+
+                if (dist < 40) {
+                    this.speak(`وصلت إلى وجهتك: ${this.activeNavigation.title}`);
+                    this.notify("وصلت إلى وجهتك بحمد الله!");
+                    this.endNavigation();
+                    return;
+                }
+
+                if (dist >= 1000) {
+                    document.getElementById('route-km').innerText = (dist / 1000).toFixed(1);
+                    document.getElementById('route-unit').innerText = 'كم';
+                } else {
+                    document.getElementById('route-km').innerText = Math.round(dist);
+                    document.getElementById('route-unit').innerText = 'متر';
+                }
+            },
+
+            endNavigation: function() {
+                this.activeNavigation = null;
+                if (this.routeLine) {
+                    this.map.removeLayer(this.routeLine);
+                    this.routeLine = null;
+                }
+                if (this.pinMarker) {
+                    this.map.removeLayer(this.pinMarker);
+                    this.pinMarker = null;
+                }
+                document.getElementById('route-hud').classList.add('hidden');
+                this.centerUserLocation();
+                this.notify("تم إنهاء التوجيه");
+            },
+
+            searchJordan: async function(query) {
+                const text = query.trim();
+                if (!text) return;
+
+                const coordMatch = text.match(/(-?\d+\.\d+)[,\s]+(-?\d+\.\d+)/);
+                if (coordMatch) {
+                    this.navigateTo(parseFloat(coordMatch[1]), parseFloat(coordMatch[2]), "الإحداثيات المدخلة");
+                    return;
+                }
+
+                if (text.includes('maps') || text.includes('goo.gl')) {
+                    const match = text.match(/(@|q=|\/place\/)(-?\d+\.\d+)[,+]+(-?\d+\.\d+)/);
+                    if (match) {
+                        this.navigateTo(parseFloat(match[2]), parseFloat(match[3]), "اللوكيشن المستلم");
+                        return;
+                    }
+                }
+
+                this.notify("جارٍ البحث في خريطة الأردن...");
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text + ', Jordan')}&countrycodes=jo&limit=5&accept-language=ar`);
+                    if (res.ok) {
+                        const items = await res.json();
+                        if (items && items.length > 0) {
+                            const first = items[0];
+                            this.navigateTo(parseFloat(first.lat), parseFloat(first.lon), first.display_name.split(',')[0]);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.warn(e);
+                }
+                this.notify("لم يتم العثور على الوجهة، يمكنك النقر مباشرة على الخريطة");
+            },
+
+            onSearchType: async function(val) {
+                const clearBtn = document.getElementById('clear-search');
+                const box = document.getElementById('suggestions-box');
+
+                if (val.trim()) clearBtn.classList.remove('hidden');
+                else {
+                    clearBtn.classList.add('hidden');
+                    box.classList.add('hidden');
+                    return;
+                }
+
+                if (val.length < 3) return;
+
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&countrycodes=jo&limit=4&accept-language=ar`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && data.length > 0) {
+                            box.innerHTML = '';
+                            data.forEach(item => {
+                                const row = document.createElement('div');
+                                row.className = 'p-2 rounded-xl bg-stone-900/90 hover:bg-stone-800 text-xs text-stone-200 cursor-pointer flex items-center justify-between transition-colors';
+                                row.innerHTML = `
+                                    <div class="flex items-center gap-2 truncate">
+                                        <i class="fas fa-location-dot text-amber-400 text-xs"></i>
+                                        <span class="truncate">${item.display_name.split(',').slice(0, 2).join(' - ')}</span>
+                                    </div>
+                                `;
+                                row.onclick = () => {
+                                    box.classList.add('hidden');
+                                    document.getElementById('search-input').value = item.display_name.split(',')[0];
+                                    this.navigateTo(parseFloat(item.lat), parseFloat(item.lon), item.display_name.split(',')[0]);
+                                };
+                                box.appendChild(row);
+                            });
+                            box.classList.remove('hidden');
+                        }
+                    }
+                } catch (e) {
+                    console.warn(e);
+                }
+            },
+
+            clearSearchInput: function() {
+                document.getElementById('search-input').value = '';
+                document.getElementById('clear-search').classList.add('hidden');
+                document.getElementById('suggestions-box').classList.add('hidden');
+            },
+
+            quickCategory: function(catName) {
+                document.getElementById('search-input').value = catName;
+                this.searchJordan(catName);
+            },
+
+            pasteWhatsApp: async function() {
+                let clip = "";
+                try {
+                    if (navigator.clipboard && navigator.clipboard.readText) {
+                        clip = await navigator.clipboard.readText();
+                    }
+                } catch (e) {}
+
+                if (!clip) {
+                    clip = prompt("الصق رابط الواتساب أو الإحداثيات هنا:") || "";
+                }
+
+                if (clip.trim()) {
+                    document.getElementById('search-input').value = clip;
+                    this.searchJordan(clip);
+                }
+            },
+
+            startClockEngine: function() {
+                const dateEl = document.getElementById('jordan-date');
+                const timeEl = document.getElementById('jordan-time');
+                const secEl = document.getElementById('jordan-seconds');
+
+                const updateTime = () => {
+                    const now = new Date();
+                    
+                    const jordanTimeStr = new Intl.DateTimeFormat('en-GB', {
+                        timeZone: 'Asia/Amman',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                    }).format(now);
+
+                    const [h, m, s] = jordanTimeStr.split(':');
+                    timeEl.innerText = `${h}:${m}`;
+                    secEl.innerText = s;
+
+                    dateEl.innerText = new Intl.DateTimeFormat('ar-JO', {
+                        timeZone: 'Asia/Amman',
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'short'
+                    }).format(now);
+                };
+
+                updateTime();
+                setInterval(updateTime, 1000);
+            },
+
+            fetchJordanWeather: async function(lat, lng) {
+                try {
+                    const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true&timezone=Asia%2FAmman`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && data.current_weather) {
+                            const cw = data.current_weather;
+                            document.getElementById('weather-temp').innerText = `${Math.round(cw.temperature)}°`;
+                            let icon = 'fas fa-sun text-amber-400';
+                            let desc = 'صافٍ';
+
+                            const c = cw.weathercode;
+                            if (c >= 1 && c <= 3) { icon = 'fas fa-cloud-sun text-amber-300'; desc = 'غائم جزئياً'; }
+                            else if (c >= 45 && c <= 48) { icon = 'fas fa-smog text-stone-300'; desc = 'ضباب'; }
+                            else if (c >= 51 && c <= 82) { icon = 'fas fa-cloud-rain text-amber-400'; desc = 'ماطر'; }
+
+                            document.getElementById('weather-icon').className = icon;
+                            document.getElementById('weather-desc').innerText = desc;
+                        }
+                    }
+                } catch (e) {
+                    console.warn(e);
+                }
+            },
+
+            reverseGeocode: async function(lat, lng) {
+                try {
+                    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=17&accept-language=ar`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data && data.display_name) {
+                            const parts = data.display_name.split(',');
+                            const street = parts[0] ? parts[0].trim() : "شارع غير مسمى";
+                            const city = parts[1] ? parts[1].trim() : "الأردن";
+                            document.getElementById('street-name-label').innerText = `${street} - ${city}`;
+                            document.getElementById('header-city-text').innerText = city;
+                        }
+                    }
+                } catch (e) {
+                    console.warn(e);
+                }
+            },
+
+            speak: function(text) {
+                if (!this.audioEnabled || !this.speechSynth) return;
+                try {
+                    this.speechSynth.cancel();
+                    const u = new SpeechSynthesisUtterance(text);
+                    u.lang = 'ar-SA';
+                    u.rate = 1.0;
+                    this.speechSynth.speak(u);
+                } catch (e) {}
+            },
+
+            toggleAudio: function() {
+                this.audioEnabled = !this.audioEnabled;
+                const icon = document.getElementById('voice-icon');
+                if (this.audioEnabled) {
+                    icon.className = 'fas fa-volume-high text-xs text-amber-400';
+                    this.notify("تم تشغيل التوجيه الصوتي");
+                } else {
+                    icon.className = 'fas fa-volume-xmark text-xs text-stone-500';
+                    this.notify("تم كتم التوجيه الصوتي");
+                }
+            },
+
+            fitWholeJordan: function() {
+                this.map.setView([31.25, 36.5], 8, { animate: true });
+                this.notify("عرض كامل خريطة الأردن");
+            },
+
+            notify: function(msg) {
+                const t = document.getElementById('toast');
+                document.getElementById('toast-message').innerText = msg;
+                t.classList.remove('hidden');
+                clearTimeout(this._tTimer);
+                this._tTimer = setTimeout(() => t.classList.add('hidden'), 3200);
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            navCore.init();
+        });
+    </script>
+</body>
+</html>
